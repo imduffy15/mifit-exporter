@@ -1,0 +1,13 @@
+FROM python:3.6-slim-buster
+
+ENV PIP_NO_CACHE_DIR "true"
+
+RUN pip install --upgrade pip pipenv
+
+COPY Pipfile.lock Pipfile /
+RUN pipenv install --dev
+
+COPY mifit_exporter /mifit_exporter
+
+RUN pipenv run flake8 --ignore E402 mifit_exporter
+RUN pipenv run yapf -i -r mifit_exporter

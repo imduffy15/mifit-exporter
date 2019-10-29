@@ -1,0 +1,13 @@
+FROM python:3.6-slim-buster
+
+ENV PIP_NO_CACHE_DIR "true"
+
+RUN pip install --upgrade pip pipenv
+
+COPY Pipfile.lock Pipfile /
+RUN pipenv install --dev
+
+COPY gpx_exporter /gpx_exporter
+
+RUN pipenv run flake8 --ignore E402 gpx_exporter
+RUN pipenv run yapf -i -r gpx_exporter

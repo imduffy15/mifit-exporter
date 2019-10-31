@@ -5,7 +5,7 @@ from bisect import bisect_left
 from collections import namedtuple
 from datetime import datetime
 from itertools import accumulate
-
+import json
 import click
 import xmltodict
 from clickclick import AliasedGroup
@@ -23,8 +23,8 @@ output_option = click.option('-o',
                              help='Use alternative output format')
 
 RawTrackData = namedtuple('RawTrackData', [
-    'start_time', 'end_time', 'cost_time', 'distance', 'times', 'lat', 'lon',
-    'alt', 'hrtimes', 'hr', 'steptimes', 'stride', 'cadence'
+    'start_time', 'times', 'lat', 'lon', 'alt', 'hrtimes', 'hr', 'steptimes',
+    'stride', 'cadence'
 ])
 Position = namedtuple('Position', ['lat', 'lon', 'alt'])
 TrackPoint = namedtuple('TrackPoint',
@@ -52,38 +52,14 @@ def print_version():
     click.echo('gpx-exporter {}'.format(gpx_exporter.__version__))
 
 
-def export_all_tracks(conn):
-    columns = (
-        'TRACKDATA.TRACKID',
-        'TRACKDATA.BULKLL',
-        'TRACKDATA.BULKGAIT',
-        'TRACKDATA.BULKAL',
-        'TRACKDATA.BULKTIME',
-        'TRACKDATA.BULKHR',
-        'TRACKDATA.BULKPAUSE',
-        'TRACKDATA.TYPE',
-        'TRACKDATA.BULKFLAG',
-        'TRACKRECORD.COSTTIME',
-        'TRACKRECORD.ENDTIME',
-        'TRACKRECORD.DISTANCE',
-    )
-    sql = """SELECT
-        {columns}
-        FROM TRACKDATA, TRACKRECORD
-        WHERE TRACKDATA.TRACKID = TRACKRECORD.TRACKID
-        ORDER BY TRACKDATA.TRACKID""".format(columns=', '.join(columns))
-    RowRecord = namedtuple('RowRecord',
-                           (col.split('.')[-1] for col in columns))
-    try:
-        for row in conn.execute(sql):
-            row = RowRecord(*row)
-            export_track_row(parse_track_data(row))
-    except sqlite3.OperationalError:
-        pass
+def export_all_tracks(input_db):
+    with open(input_db, 'r') as f:
+        data = json.load(f)['data']
+        export_activity(parse_activity_data(data))
 
 
-def export_track_row(row):
-    start_time = DT.datetime.utcfromtimestamp(row.start_time).isoformat()
+def export_activity(activity):
+    start_time = DT.datetime.utcfromtimestamp(activity.start_time).isoformat()
     xml = {
         "gpx": {
             "@xmlns": "http://www.topografix.com/GPX/1/1",
@@ -101,9 +77,9 @@ def export_track_row(row):
             }
         }
     }
-    for point in track_points(interpolate_data(row)):
+    for point in track_points(interpolate_data(activity)):
         time = datetime.utcfromtimestamp(point.time +
-                                         row.start_time).isoformat()
+                                         activity.start_time).isoformat()
         trkpt = {
             "ele": point.position.alt,
             "time": time,
@@ -183,45 +159,43 @@ def track_points(track_data):
         )
 
 
-def parse_track_data(row):
+def parse_activity_data(data):
     return RawTrackData(
-        start_time=int(row.TRACKID),
-        end_time=int(row.ENDTIME),
-        cost_time=int(row.COSTTIME),
-        distance=int(row.DISTANCE),
+        start_time=int(data["trackid"]),
         times=array.array('l',
-                          [int(val) for val in row.BULKTIME.split(';')
-                           if val] if row.BULKTIME else []),
-        lat=array.array(
-            'l',
-            [int(val.split(',')[0]) for val in row.BULKLL.split(';')
-             if val] if row.BULKLL else []),
-        lon=array.array(
-            'l',
-            [int(val.split(',')[1]) for val in row.BULKLL.split(';')
-             if val] if row.BULKLL else []),
-        alt=array.array('l',
-                        [int(val) for val in row.BULKAL.split(';')
-                         if val] if row.BULKAL else []),
+                          [int(val) for val in data["time"].split(';')
+                           if val] if data["time"] else []),
+        lat=array.array('l', [
+            int(val.split(',')[0])
+            for val in data["longitude_latitude"].split(';') if val
+        ] if data["longitude_latitude"] else []),
+        lon=array.array('l', [
+            int(val.split(',')[1])
+            for val in data["longitude_latitude"].split(';') if val
+        ] if data["longitude_latitude"] else []),
+        alt=array.array(
+            'l', [int(val) for val in data["altitude"].split(';')
+                  if val] if data["altitude"] else []),
         hrtimes=array.array('l', [
-            int(val.split(',')[0] or 1) for val in row.BULKHR.split(';') if val
-        ] if row.BULKHR else []),
-        hr=array.array(
-            'l',
-            [int(val.split(',')[1]) for val in row.BULKHR.split(';')
-             if val] if row.BULKHR else []),
+            int(val.split(',')[0] or 1)
+            for val in data["heart_rate"].split(';') if val
+        ] if data["heart_rate"] else []),
+        hr=array.array('l', [
+            int(val.split(',')[1]) for val in data["heart_rate"].split(';')
+            if val
+        ] if data["heart_rate"] else []),
         steptimes=array.array(
             'l',
-            [int(val.split(',')[0]) for val in row.BULKGAIT.split(';')
-             if val] if row.BULKGAIT else []),
+            [int(val.split(',')[0]) for val in data["gait"].split(';')
+             if val] if data["gait"] else []),
         stride=array.array(
             'l',
-            [int(val.split(',')[2]) for val in row.BULKGAIT.split(';')
-             if val] if row.BULKGAIT else []),
+            [int(val.split(',')[2]) for val in data["gait"].split(';')
+             if val] if data["gait"] else []),
         cadence=array.array(
             'l',
-            [int(val.split(',')[3]) for val in row.BULKGAIT.split(';')
-             if val] if row.BULKGAIT else []),
+            [int(val.split(',')[3]) for val in data["gait"].split(';')
+             if val] if data["gait"] else []),
     )
 
 
@@ -232,13 +206,13 @@ def parse_track_data(row):
 #               expose_value=False,
 #               is_eager=True,
 #               help='Print the current version number and exit.')
-@click.group(invoke_without_command=True, cls=AliasedGroup, context_settings=CONTEXT_SETTINGS)
+@click.group(invoke_without_command=True,
+             cls=AliasedGroup,
+             context_settings=CONTEXT_SETTINGS)
 @click.argument('input-db', type=click.Path(exists=True))
 @click.argument('output-file', type=click.Path(exists=False))
 def cli(input_db, output_file):
-    conn = sqlite3.connect(input_db)
-    tracks = export_all_tracks(conn)
-    conn.close()
+    tracks = export_all_tracks(input_db)
 
 
 def main():

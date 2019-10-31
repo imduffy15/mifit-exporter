@@ -5,16 +5,17 @@ from bisect import bisect_left
 from collections import namedtuple
 from datetime import datetime
 from itertools import accumulate
-
+import json
 import click
 import xmltodict
 from clickclick import AliasedGroup
-
+from deepmerge import conservative_merger
 import gpx_exporter
 
 CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
 
 NO_VALUE = -2000000
+FIX_BIP_GAPS = False
 
 output_option = click.option('-o',
                              '--output',
@@ -23,12 +24,14 @@ output_option = click.option('-o',
                              help='Use alternative output format')
 
 RawTrackData = namedtuple('RawTrackData', [
-    'start_time', 'end_time', 'cost_time', 'distance', 'times', 'lat', 'lon',
-    'alt', 'hrtimes', 'hr', 'steptimes', 'stride', 'cadence'
+    'start_time', 'end_time', 'cost_time', 'avg_heart_rate', 'max_heart_rate',
+    'min_heart_rate', 'calorie', 'total_step', 'times', 'lat', 'lon', 'alt',
+    'distance', 'distancetimes', 'hrtimes', 'hr', 'steptimes', 'stride',
+    'cadence'
 ])
 Position = namedtuple('Position', ['lat', 'lon', 'alt'])
-TrackPoint = namedtuple('TrackPoint',
-                        ['time', 'position', 'hr', 'stride', 'cadence'])
+TrackPoint = namedtuple(
+    'TrackPoint', ['time', 'position', 'hr', 'stride', 'cadence', 'distance'])
 
 
 class Interpolate(object):
@@ -52,41 +55,19 @@ def print_version():
     click.echo('gpx-exporter {}'.format(gpx_exporter.__version__))
 
 
-def export_all_tracks(conn):
-    columns = (
-        'TRACKDATA.TRACKID',
-        'TRACKDATA.BULKLL',
-        'TRACKDATA.BULKGAIT',
-        'TRACKDATA.BULKAL',
-        'TRACKDATA.BULKTIME',
-        'TRACKDATA.BULKHR',
-        'TRACKDATA.BULKPAUSE',
-        'TRACKDATA.TYPE',
-        'TRACKDATA.BULKFLAG',
-        'TRACKRECORD.COSTTIME',
-        'TRACKRECORD.ENDTIME',
-        'TRACKRECORD.DISTANCE',
-    )
-    sql = """SELECT
-        {columns}
-        FROM TRACKDATA, TRACKRECORD
-        WHERE TRACKDATA.TRACKID = TRACKRECORD.TRACKID
-        ORDER BY TRACKDATA.TRACKID""".format(columns=', '.join(columns))
-    RowRecord = namedtuple('RowRecord',
-                           (col.split('.')[-1] for col in columns))
-    try:
-        for row in conn.execute(sql):
-            row = RowRecord(*row)
-            export_track_row(parse_track_data(row))
-    except sqlite3.OperationalError:
-        pass
+def export_all_tracks(summary, detail):
+    data = {}
+    with open(detail, 'r') as f:
+        data = json.load(f)
+    with open(summary, 'r') as f:
+        conservative_merger.merge(data, json.load(f))
+
+    export_activity(parse_activity_data(data))
 
 
-def export_track_row(row):
-    start_time = DT.datetime.utcfromtimestamp(row.start_time +
-                                              1808).isoformat()
-
-    xml = {
+def export_activity(activity):
+    start_time = DT.datetime.utcfromtimestamp(activity.start_time).isoformat()
+    tcx = {
         "TrainingCenterDatabase": {
             "@xmlns:ns2": "http://www.garmin.com/xmlschemas/UserProfile/v2",
             "@xmlns:ns4":
@@ -103,181 +84,140 @@ def export_track_row(row):
                     "Id": start_time,
                     "Lap": {
                         "@StartTime": start_time,
-                        "TotalTimeSeconds": 22208.0,
-                        "DistanceMeters": 1.0,
-                        "MaximumSpeed": 3.6,
-                        "Calories": 0,
+                        "TotalTimeSeconds": float(activity.cost_time),
+                        "DistanceMeters": float(sum(activity.distance)),
+                        "Calories": int(activity.calorie),
                         "AverageHeartRateBpm": {
-                            "Value": 0
+                            "Value": int(activity.avg_heart_rate)
                         },
-                        "MaximumHeartRateBpm": {
-                            "Value": 20
-                        },
-                        "Intensity": "Active",
-                        "TriggerMethod": "Manual",
                         "Track": {
-                            "Trackpoint": [{
-                                "Time": start_time,
-                                "DistanceMeters": 1.0,
-                                "HeartRateBpm": {
-                                    "@xsi:type": "HeartRateInBeatsPerMinute_t",
-                                    "Value": 80
-                                },
-                                "Extensions": {
-                                    "TPX": {
-                                        "@xmlns":
-                                        "http://www.garmin.com/xmlschemas/ActivityExtension/v2",
-                                        "Speed": 2.1
-                                    }
-                                }
-                            }]
-                        },
-                        "Extensions": {
-                            "LX": {
-                                "@xmlns":
-                                "http://www.garmin.com/xmlschemas/ActivityExtension/v2",
-                                "AvgSpeed": 2.795
-                            }
+                            "Trackpoint": []
                         }
                     },
                     "Notes": "Synced run"
                 }]
-            },
-            "Author": {
-                "@xsi:type": "Application_t",
-                "Name": "tapiriik",
-                "Build": {
-                    "Version": {
-                        "VersionMajor": 0,
-                        "VersionMinor": 0,
-                        "BuildMajor": 0,
-                        "BuildMinor": 0
-                    }
-                },
-                "LangID": "en",
-                "PartNumber": "000-00000-00"
             }
         }
     }
 
-    # xml = {
-    #     "gpx": {
-    #         "@xmlns": "http://www.topografix.com/GPX/1/1",
-    #         "@xmlns:gpxdata": "http://www.cluetrust.com/XML/GPXDATA/1/0",
-    #         "@xmlns:gpxtpx":
-    #         "http://www.garmin.com/xmlschemas/TrackPointExtension/v1",
-    #         "metadata": {
-    #             "time": start_time
-    #         },
-    #         "trk": {
-    #             "name": start_time,
-    #             "trkseg": {
-    #                 "trkpt": []
-    #             }
-    #         }
-    #     }
-    # }
-    # for point in track_points(interpolate_data(row)):
-    #     time = datetime.utcfromtimestamp(point.time + row.start_time +
-    #                                      1808).isoformat()
-    # track_point = {
-    #     "Time": time,
-    #     "DistanceMeters": 1.0,
-    #     "HeartRateBpm": {
-    #         "@xsi:type": "HeartRateInBeatsPerMinute_t",
-    #         "Value": 80
-    #     },
-    #     "Extensions": {
-    #         "TPX": {
-    #             "@xmlns":
-    #             "http://www.garmin.com/xmlschemas/ActivityExtension/v2",
-    #             "Speed": 2.1
-    #         }
-    #     }
-    # }
-    # trkpt = {
-    #     #     # "ele": point.position.alt,
-    #     #     "time": time,
-    #     #     # "@lat": point.position.lat,
-    #     #     # "@lon": point.position.lon,
-    #     #     "extensions": {
-    #     #         "gpxtpx:TrackPointExtension": {}
-    #     #     }
-    #     # }
+    gpx = {
+        "gpx": {
+            "@xmlns": "http://www.topografix.com/GPX/1/1",
+            "@xmlns:gpxdata": "http://www.cluetrust.com/XML/GPXDATA/1/0",
+            "@xmlns:gpxtpx":
+            "http://www.garmin.com/xmlschemas/TrackPointExtension/v1",
+            "metadata": {
+                "time": start_time
+            },
+            "trk": {
+                "name": start_time,
+                "type": 10,
+                "trkseg": {
+                    "trkpt": []
+                }
+            }
+        }
+    }
 
-    #     # if point.hr:
-    #     #     trkpt["extensions"]['gpxtpx:TrackPointExtension'][
-    #     #         'gpxtpx:hr'] = point.hr
+    for point in track_points(interpolate_data(activity)):
+        time = datetime.utcfromtimestamp(point.time +
+                                         activity.start_time).isoformat()
+        tcx_trkpt = {
+            "Time": time,
+            "DistanceMeters": float(point.distance),
+            "HeartRateBpm": {
+                "@xsi:type": "HeartRateInBeatsPerMinute_t"
+            },
+            "Extensions": {
+                "TPX": {
+                    "@xmlns":
+                    "http://www.garmin.com/xmlschemas/ActivityExtension/v2"
+                }
+            }
+        }
 
-    #     # if point.cadence:
-    #     #     trkpt["extensions"]["gpxdata:cadence"] = point.cadence
+        gpx_trkpt = {
+            "ele": point.position.alt,
+            "time": time,
+            "@lat": point.position.lat,
+            "@lon": point.position.lon,
+            "extensions": {
+                "gpxtpx:TrackPointExtension": {}
+            }
+        }
 
-    #     xml['TrainingCenterDatabase']['Activities']['Activity'][0]['Lap'][
-    #         'Track']["TrackPoint"].append(track_point)
-    click.echo(xmltodict.unparse(xml, pretty=True))
+        if point.hr:
+            gpx_trkpt["extensions"]['gpxtpx:TrackPointExtension'][
+                'gpxtpx:hr'] = point.hr
+            tcx_trkpt["HeartRateBpm"]["Value"] = point.hr
 
+        if point.cadence:
+            gpx_trkpt["extensions"]["gpxdata:cadence"] = point.cadence
+            tcx_trkpt["Extensions"]["TPX"]["RunCadence"] = point.cadence
 
-# def export_track_row(row):
-#     start_time = DT.datetime.utcfromtimestamp(row.start_time + 1808).isoformat()
-#     xml = {
-#         "gpx": {
-#             "@xmlns": "http://www.topografix.com/GPX/1/1",
-#             "@xmlns:gpxdata": "http://www.cluetrust.com/XML/GPXDATA/1/0",
-#             "@xmlns:gpxtpx":
-#             "http://www.garmin.com/xmlschemas/TrackPointExtension/v1",
-#             "metadata": {
-#                 "time": start_time
-#             },
-#             "trk": {
-#                 "name": start_time,
-#                 "trkseg": {
-#                     "trkpt": []
-#                 }
-#             }
-#         }
-#     }
-#     for point in track_points(interpolate_data(row)):
-#         time = datetime.utcfromtimestamp(point.time +
-#                                          row.start_time + 1808).isoformat()
-#         trkpt = {
-#             # "ele": point.position.alt,
-#             "time": time,
-#             # "@lat": point.position.lat,
-#             # "@lon": point.position.lon,
-#             "extensions": {
-#                 "gpxtpx:TrackPointExtension": {}
-#             }
-#         }
+        gpx['gpx']['trk']['trkseg']['trkpt'].append(gpx_trkpt)
+        tcx['TrainingCenterDatabase']['Activities']['Activity'][0][
+            'Lap']['Track']['Trackpoint'].append(tcx_trkpt)
 
-#         if point.hr:
-#             trkpt["extensions"]['gpxtpx:TrackPointExtension'][
-#                 'gpxtpx:hr'] = point.hr
-
-#         if point.cadence:
-#             trkpt["extensions"]["gpxdata:cadence"] = point.cadence
-
-#         xml['gpx']['trk']['trkseg']['trkpt'].append(trkpt)
-#     click.echo(xmltodict.unparse(xml, pretty=True))
+    click.echo(xmltodict.unparse(tcx, pretty=True))
+    # click.echo(xmltodict.unparse(gpx, pretty=True))
 
 
 def interpolate_data(track_data):
     track_times = array.array('l', accumulate(track_data.times))
     hr_times = array.array('l', accumulate(track_data.hrtimes))
     step_times = array.array('l', accumulate(track_data.steptimes))
+    distance_times = array.array('l', accumulate(track_data.distancetimes))
 
-    times = list(sorted(set(track_times).union(hr_times).union(step_times)))
+    def change_times(times, change, time_from):
+        return array.array('l', (time + change if time >= time_from else time
+                                 for time in times))
 
-    return track_data._replace(
+    times = list(
+        sorted(
+            set(track_times).union(hr_times).union(step_times).union(
+                distance_times)))
+
+    if FIX_BIP_GAPS:
+        time_to_trim = (times[-1] - track_data.cost_time) if track_times else 0
+        while time_to_trim > 0:
+            max_time = 0
+            max_interval = 0
+            last_time = 0
+            for time in times:
+                current_interval = time - last_time
+                last_time = time
+                if current_interval > max_interval:
+                    max_interval = current_interval
+                    max_time = time
+            time_change = max(max_interval - time_to_trim, 1) - max_interval
+            track_times = change_times(track_times, time_change, max_time)
+            distance_times = change_times(distance_times, time_change,
+                                          max_time)
+            hr_times = change_times(hr_times, time_change, max_time)
+            step_times = change_times(step_times, time_change, max_time)
+            time_to_trim += time_change
+            times = list(
+                sorted(
+                    set(track_times).union(hr_times).union(step_times).union(
+                        distance_times)))
+
+    track_data = track_data._replace(
         times=times,
         lat=interpolate_column(accumulate(track_data.lat), track_times, times),
         lon=interpolate_column(accumulate(track_data.lon), track_times, times),
         alt=interpolate_column(track_data.alt, track_times, times),
+        distance=interpolate_column(accumulate(track_data.distance), distance_times,
+                                    times),
+        distancetimes=times,
         hrtimes=times,
         hr=interpolate_column(accumulate(track_data.hr), hr_times, times),
         steptimes=times,
         stride=interpolate_column(track_data.stride, step_times, times),
         cadence=interpolate_column(track_data.cadence, step_times, times),
     )
+
+    return track_data
 
 
 def interpolate_column(data, original_points, new_points):
@@ -304,78 +244,90 @@ def interpolate_column(data, original_points, new_points):
 
 
 def track_points(track_data):
-    for time, lat, lon, alt, hr, stride, cadence in zip(
+    for time, lat, lon, alt, hr, stride, cadence, distance in zip(
             track_data.times, track_data.lat, track_data.lon, track_data.alt,
-            track_data.hr, track_data.stride, track_data.cadence):
-        yield TrackPoint(
-            time=time,
-            position=Position(lat=lat / 100000000,
-                              lon=lon / 100000000,
-                              alt=alt / 100),
-            hr=hr,
-            stride=stride,
-            cadence=cadence,
-        )
+            track_data.hr, track_data.stride, track_data.cadence,
+            track_data.distance):
+        yield TrackPoint(time=time,
+                         position=Position(lat=lat / 100000000,
+                                           lon=lon / 100000000,
+                                           alt=alt / 100),
+                         hr=hr,
+                         stride=stride,
+                         cadence=cadence,
+                         distance=distance)
 
 
-def parse_track_data(row):
-    return RawTrackData(
-        start_time=int(row.TRACKID),
-        end_time=int(row.ENDTIME),
-        cost_time=int(row.COSTTIME),
-        distance=int(row.DISTANCE),
+def parse_activity_data(data):
+    track_data = RawTrackData(
+        start_time=int(data["trackid"]),
+        end_time=int(data["end_time"]),
+        cost_time=int(data["run_time"]),
+        avg_heart_rate=float(data["avg_heart_rate"]),
+        max_heart_rate=float(data["max_heart_rate"]),
+        min_heart_rate=float(data["min_heart_rate"]),
+        calorie=float(data["calorie"]),
+        total_step=int(data["total_step"]),
         times=array.array('l',
-                          [int(val) for val in row.BULKTIME.split(';')
-                           if val] if row.BULKTIME else []),
-        lat=array.array(
-            'l',
-            [int(val.split(',')[0]) for val in row.BULKLL.split(';')
-             if val] if row.BULKLL else []),
-        lon=array.array(
-            'l',
-            [int(val.split(',')[1]) for val in row.BULKLL.split(';')
-             if val] if row.BULKLL else []),
-        alt=array.array('l',
-                        [int(val) for val in row.BULKAL.split(';')
-                         if val] if row.BULKAL else []),
+                          [int(val) for val in data["time"].split(';')
+                           if val] if data["time"] else []),
+        lat=array.array('l', [
+            int(val.split(',')[0])
+            for val in data["longitude_latitude"].split(';') if val
+        ] if data["longitude_latitude"] else []),
+        lon=array.array('l', [
+            int(val.split(',')[1])
+            for val in data["longitude_latitude"].split(';') if val
+        ] if data["longitude_latitude"] else []),
+        alt=array.array(
+            'l', [int(val) for val in data["altitude"].split(';')
+                  if val] if data["altitude"] else []),
+        distance=array.array('l', [
+            int(val.split(',')[1]) for val in data["distance"].split(';')
+            if val
+        ] if data["distance"] else []),
+        distancetimes=array.array('l', [
+            int(val.split(',')[0] or 1) for val in data["distance"].split(';')
+            if val
+        ] if data["distance"] else []),
         hrtimes=array.array('l', [
-            int(val.split(',')[0] or 1) for val in row.BULKHR.split(';') if val
-        ] if row.BULKHR else []),
-        hr=array.array(
-            'l',
-            [int(val.split(',')[1]) for val in row.BULKHR.split(';')
-             if val] if row.BULKHR else []),
+            int(val.split(',')[0] or 1)
+            for val in data["heart_rate"].split(';') if val
+        ] if data["heart_rate"] else []),
+        hr=array.array('l', [
+            int(val.split(',')[1]) for val in data["heart_rate"].split(';')
+            if val
+        ] if data["heart_rate"] else []),
         steptimes=array.array(
             'l',
-            [int(val.split(',')[0]) for val in row.BULKGAIT.split(';')
-             if val] if row.BULKGAIT else []),
+            [int(val.split(',')[0]) for val in data["gait"].split(';')
+             if val] if data["gait"] else []),
         stride=array.array(
             'l',
-            [int(val.split(',')[2]) for val in row.BULKGAIT.split(';')
-             if val] if row.BULKGAIT else []),
+            [int(val.split(',')[2]) for val in data["gait"].split(';')
+             if val] if data["gait"] else []),
         cadence=array.array(
             'l',
-            [int(val.split(',')[3]) for val in row.BULKGAIT.split(';')
-             if val] if row.BULKGAIT else []),
+            [int(val.split(',')[3]) for val in data["gait"].split(';')
+             if val] if data["gait"] else []),
     )
+    return track_data
 
 
-# @click.option('-V',
-#               '--version',
-#               is_flag=True,
-#               callback=print_version,
-#               expose_value=False,
-#               is_eager=True,
-#               help='Print the current version number and exit.')
+@click.option('-V',
+              '--version',
+              is_flag=True,
+              callback=print_version,
+              expose_value=False,
+              is_eager=True,
+              help='Print the current version number and exit.')
 @click.group(invoke_without_command=True,
              cls=AliasedGroup,
              context_settings=CONTEXT_SETTINGS)
-@click.argument('input-db', type=click.Path(exists=True))
-@click.argument('output-file', type=click.Path(exists=False))
-def cli(input_db, output_file):
-    conn = sqlite3.connect(input_db)
-    tracks = export_all_tracks(conn)
-    conn.close()
+@click.argument('summary', type=click.Path(exists=True))
+@click.argument('detail', type=click.Path(exists=True))
+def cli(summary, detail):
+    tracks = export_all_tracks(summary, detail)
 
 
 def main():

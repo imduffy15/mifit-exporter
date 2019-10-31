@@ -83,46 +83,181 @@ def export_all_tracks(conn):
 
 
 def export_track_row(row):
-    start_time = DT.datetime.utcfromtimestamp(row.start_time).isoformat()
+    start_time = DT.datetime.utcfromtimestamp(row.start_time +
+                                              1808).isoformat()
+
     xml = {
-        "gpx": {
-            "@xmlns": "http://www.topografix.com/GPX/1/1",
-            "@xmlns:gpxdata": "http://www.cluetrust.com/XML/GPXDATA/1/0",
-            "@xmlns:gpxtpx":
-            "http://www.garmin.com/xmlschemas/TrackPointExtension/v1",
-            "metadata": {
-                "time": start_time
+        "TrainingCenterDatabase": {
+            "@xmlns:ns2": "http://www.garmin.com/xmlschemas/UserProfile/v2",
+            "@xmlns:ns4":
+            "http://www.garmin.com/xmlschemas/ProfileExtension/v1",
+            "@xmlns:ns5": "http://www.garmin.com/xmlschemas/ActivityGoals/v1",
+            "@xmlns:tpx":
+            "http://www.garmin.com/xmlschemas/ActivityExtension/v2",
+            "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
+            "@xmlns":
+            "http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2",
+            "Activities": {
+                "Activity": [{
+                    "@Sport": "Running",
+                    "Id": start_time,
+                    "Lap": {
+                        "@StartTime": start_time,
+                        "TotalTimeSeconds": 22208.0,
+                        "DistanceMeters": 1.0,
+                        "MaximumSpeed": 3.6,
+                        "Calories": 0,
+                        "AverageHeartRateBpm": {
+                            "Value": 0
+                        },
+                        "MaximumHeartRateBpm": {
+                            "Value": 20
+                        },
+                        "Intensity": "Active",
+                        "TriggerMethod": "Manual",
+                        "Track": {
+                            "Trackpoint": [{
+                                "Time": start_time,
+                                "DistanceMeters": 1.0,
+                                "HeartRateBpm": {
+                                    "@xsi:type": "HeartRateInBeatsPerMinute_t",
+                                    "Value": 80
+                                },
+                                "Extensions": {
+                                    "TPX": {
+                                        "@xmlns":
+                                        "http://www.garmin.com/xmlschemas/ActivityExtension/v2",
+                                        "Speed": 2.1
+                                    }
+                                }
+                            }]
+                        },
+                        "Extensions": {
+                            "LX": {
+                                "@xmlns":
+                                "http://www.garmin.com/xmlschemas/ActivityExtension/v2",
+                                "AvgSpeed": 2.795
+                            }
+                        }
+                    },
+                    "Notes": "Synced run"
+                }]
             },
-            "trk": {
-                "name": start_time,
-                "trkseg": {
-                    "trkpt": []
-                }
+            "Author": {
+                "@xsi:type": "Application_t",
+                "Name": "tapiriik",
+                "Build": {
+                    "Version": {
+                        "VersionMajor": 0,
+                        "VersionMinor": 0,
+                        "BuildMajor": 0,
+                        "BuildMinor": 0
+                    }
+                },
+                "LangID": "en",
+                "PartNumber": "000-00000-00"
             }
         }
     }
-    for point in track_points(interpolate_data(row)):
-        time = datetime.utcfromtimestamp(point.time +
-                                         row.start_time).isoformat()
-        trkpt = {
-            "ele": point.position.alt,
-            "time": time,
-            "@lat": point.position.lat,
-            "@lon": point.position.lon,
-            "extensions": {
-                "gpxtpx:TrackPointExtension": {}
-            }
-        }
 
-        if point.hr:
-            trkpt["extensions"]['gpxtpx:TrackPointExtension'][
-                'gpxtpx:hr'] = point.hr
+    # xml = {
+    #     "gpx": {
+    #         "@xmlns": "http://www.topografix.com/GPX/1/1",
+    #         "@xmlns:gpxdata": "http://www.cluetrust.com/XML/GPXDATA/1/0",
+    #         "@xmlns:gpxtpx":
+    #         "http://www.garmin.com/xmlschemas/TrackPointExtension/v1",
+    #         "metadata": {
+    #             "time": start_time
+    #         },
+    #         "trk": {
+    #             "name": start_time,
+    #             "trkseg": {
+    #                 "trkpt": []
+    #             }
+    #         }
+    #     }
+    # }
+    # for point in track_points(interpolate_data(row)):
+    #     time = datetime.utcfromtimestamp(point.time + row.start_time +
+    #                                      1808).isoformat()
+    # track_point = {
+    #     "Time": time,
+    #     "DistanceMeters": 1.0,
+    #     "HeartRateBpm": {
+    #         "@xsi:type": "HeartRateInBeatsPerMinute_t",
+    #         "Value": 80
+    #     },
+    #     "Extensions": {
+    #         "TPX": {
+    #             "@xmlns":
+    #             "http://www.garmin.com/xmlschemas/ActivityExtension/v2",
+    #             "Speed": 2.1
+    #         }
+    #     }
+    # }
+    # trkpt = {
+    #     #     # "ele": point.position.alt,
+    #     #     "time": time,
+    #     #     # "@lat": point.position.lat,
+    #     #     # "@lon": point.position.lon,
+    #     #     "extensions": {
+    #     #         "gpxtpx:TrackPointExtension": {}
+    #     #     }
+    #     # }
 
-        if point.cadence:
-            trkpt["extensions"]["gpxdata:cadence"] = point.cadence
+    #     # if point.hr:
+    #     #     trkpt["extensions"]['gpxtpx:TrackPointExtension'][
+    #     #         'gpxtpx:hr'] = point.hr
 
-        xml['gpx']['trk']['trkseg']['trkpt'].append(trkpt)
+    #     # if point.cadence:
+    #     #     trkpt["extensions"]["gpxdata:cadence"] = point.cadence
+
+    #     xml['TrainingCenterDatabase']['Activities']['Activity'][0]['Lap'][
+    #         'Track']["TrackPoint"].append(track_point)
     click.echo(xmltodict.unparse(xml, pretty=True))
+
+
+# def export_track_row(row):
+#     start_time = DT.datetime.utcfromtimestamp(row.start_time + 1808).isoformat()
+#     xml = {
+#         "gpx": {
+#             "@xmlns": "http://www.topografix.com/GPX/1/1",
+#             "@xmlns:gpxdata": "http://www.cluetrust.com/XML/GPXDATA/1/0",
+#             "@xmlns:gpxtpx":
+#             "http://www.garmin.com/xmlschemas/TrackPointExtension/v1",
+#             "metadata": {
+#                 "time": start_time
+#             },
+#             "trk": {
+#                 "name": start_time,
+#                 "trkseg": {
+#                     "trkpt": []
+#                 }
+#             }
+#         }
+#     }
+#     for point in track_points(interpolate_data(row)):
+#         time = datetime.utcfromtimestamp(point.time +
+#                                          row.start_time + 1808).isoformat()
+#         trkpt = {
+#             # "ele": point.position.alt,
+#             "time": time,
+#             # "@lat": point.position.lat,
+#             # "@lon": point.position.lon,
+#             "extensions": {
+#                 "gpxtpx:TrackPointExtension": {}
+#             }
+#         }
+
+#         if point.hr:
+#             trkpt["extensions"]['gpxtpx:TrackPointExtension'][
+#                 'gpxtpx:hr'] = point.hr
+
+#         if point.cadence:
+#             trkpt["extensions"]["gpxdata:cadence"] = point.cadence
+
+#         xml['gpx']['trk']['trkseg']['trkpt'].append(trkpt)
+#     click.echo(xmltodict.unparse(xml, pretty=True))
 
 
 def interpolate_data(track_data):
@@ -232,7 +367,9 @@ def parse_track_data(row):
 #               expose_value=False,
 #               is_eager=True,
 #               help='Print the current version number and exit.')
-@click.group(invoke_without_command=True, cls=AliasedGroup, context_settings=CONTEXT_SETTINGS)
+@click.group(invoke_without_command=True,
+             cls=AliasedGroup,
+             context_settings=CONTEXT_SETTINGS)
 @click.argument('input-db', type=click.Path(exists=True))
 @click.argument('output-file', type=click.Path(exists=False))
 def cli(input_db, output_file):

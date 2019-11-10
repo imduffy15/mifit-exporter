@@ -42,3 +42,23 @@ $ curl -H "apptoken: $APP_TOKEN" --compressed "https://api-mifit-de.huami.com/v1
 $ pipenv install
 $ pipenv run python -m mifit_exporter summary.json details.json .
 ```
+
+### Uploading to Garmin Connect
+
+```
+$ pip install garmin-uploader
+```
+
+Create `~/.guploadrc` containing your Garmin Connect login details:
+
+```
+[Credentials]
+username=<username>
+password=<password>
+```
+
+Upload an activity as follows:
+
+```
+$ gupload -a "Evening walk" latest.tcx 
+```

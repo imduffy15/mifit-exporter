@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "80eb44c874a047d7c4e9ca7bd8500da952fb9ad8ae2031c6915a3fb4c4ddc4cb"
+            "sha256": "c49f4e0b018f9cb2c48a28e64d8cba475168454ca72bd354f858b6b3e6b02b18"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -31,6 +31,14 @@
             ],
             "index": "pypi",
             "version": "==1.2.2"
+        },
+        "deepmerge": {
+            "hashes": [
+                "sha256:3d37f739e74e8a284ee0bd683daaef88acc8438ba048545aefb87ade695a2a34",
+                "sha256:ae23dd76d3c0d22d33a3fd3980c92d3f0773e4affb48d9b341847d0b0a24e8f8"
+            ],
+            "index": "pypi",
+            "version": "==0.1.0"
         },
         "dicttoxml": {
             "hashes": [

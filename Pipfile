@@ -8,6 +8,7 @@ click = "*"
 clickclick = "*"
 dicttoxml = "*"
 xmltodict = "*"
+deepmerge = "*"
 
 [dev-packages]
 flake8 = "*"

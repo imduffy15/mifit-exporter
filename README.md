@@ -17,7 +17,7 @@ $ token-cli token get 571394967398-j6vs98u325la013f0ho6hehosdi2h2eb.apps.googleu
 This generates a token for the client-id `571394967398-j6vs98u325la013f0ho6hehosdi2h2eb.apps.googleusercontent.com`, this token can now be exchanged for a MiFit token:
 
 ```
-$ export APP_TOKEN=$(curl -H 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8' --data-binary "app_version=4.0.7&country_code=GB&device_id=0&third_name=google&device_model=gpx-exporter&app_name=com.xiaomi.hm.health&code=$(token-cli token get 571394967398-j6vs98u325la013f0ho6hehosdi2h2eb.apps.googleusercontent.com --scope openid)&grant_type=request_token" --compressed 'https://account.huami.com/v2/client/login' | jq -r ".token_info.app_token")
+$ export APP_TOKEN=$(curl -H 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8' --data-binary "app_version=4.0.7&country_code=GB&device_id=0&third_name=google&device_model=gpx-exporter&app_name=com.xiaomi.hm.health&code=$(token-cli token get 571394967398-j6vs98u325la013f0ho6hehosdi2h2eb.apps.googleusercontent.com --scope openid | jq -r ".access_token")&grant_type=request_token" --compressed 'https://account.huami.com/v2/client/login' | jq -r ".token_info.app_token")
 ```
 
 ### Acquiring latest activity:
